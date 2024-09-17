@@ -35,7 +35,7 @@ public class SmokeTests {
 
     @Test(mainClass = LoadLibrary.class)
     public void loadLibrary(TestProcess p) throws Exception {
-        p.profile("-f %f -o collapsed -d 4 -i 1ms");
+        p.profile("-f %f -o collapsed -d 9 -i 1ms");
         Output out = p.readFile("%f");
         assert out.contains("Java_sun_management");
     }

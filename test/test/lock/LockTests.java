@@ -8,6 +8,7 @@ package test.lock;
 import one.profiler.test.Output;
 import one.profiler.test.Test;
 import one.profiler.test.TestProcess;
+import one.profiler.test.Os;
 
 public class LockTests {
     private static void contendedLocks(TestProcess p, int interval, double minRatio) throws Exception {
@@ -22,15 +23,15 @@ public class LockTests {
     }
 
     // 0 is equivalent to disabling sampling of locks, so all profiles are included.
-    @Test(mainClass = LockProfiling.class, inputs = { "0", "70" })
-    @Test(mainClass = LockProfiling.class, inputs = { "10000", "70" })
+    @Test(mainClass = LockProfiling.class, inputs = { "0", "70" }, os = Os.LINUX)
+    @Test(mainClass = LockProfiling.class, inputs = { "10000", "70" }, os = Os.LINUX)
 
     // Large (for the specific paylod) interval value skews the sampled lock
     // contention distribution.
-    @Test(mainClass = LockProfiling.class, inputs = { "1000000", "90" })
+    @Test(mainClass = LockProfiling.class, inputs = { "1000000", "90" }, os = Os.LINUX)
 
     // Very large interval causes all profiles be dropped.
-    @Test(mainClass = LockProfiling.class, inputs = { "1000000000", "NaN" })
+    @Test(mainClass = LockProfiling.class, inputs = { "1000000000", "NaN" }, os = Os.LINUX)
     public void contendedLocks(TestProcess p) throws Exception {
         int interval = Integer.parseInt(p.inputs()[0]);
         double minRatio = Double.parseDouble(p.inputs()[1]);

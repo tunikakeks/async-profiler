@@ -1,0 +1,80 @@
+name: Publish Nightly Builds
+
+on:
+  push:
+    branches:
+      - nightly_build
+env:
+  REPOSITORY: async-profiler/async-profiler
+  RELEASE_ID: 175290112
+jobs:
+  delete-all-but-last-five-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 5
+      - name: Delete old commits
+        run: |
+          # get the last 5 commit hashes in the format 
+          #    contains($HASH1) or contains($HASH2) or
+          # to insert into jq
+          last_five_hashes=$(git log  --format='contains("%h") or' --abbrev=8 -n5 | tr '\n' ' ')
+          echo $last_five_hashes
+          # get the ids of all published artifacts in the nightly release that are not for the latest 5 hashes
+          ids=$(curl -L  -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -H "X-GitHub-Api-Version: 2022-11-28"  "https://api.github.com/repos/${REPOSITORY}/releases/${RELEASE_ID}/assets" | jq ".[]|select(.name | ($last_five_hashes false) | not).id")
+          # delete all assets in the nightly release
+          for id in $ids; do curl -L -X DELETE -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${REPOSITORY}/releases/assets/${id}"; done
+  build-and-publish-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and Test
+        run: |
+          make COMMIT_TAG=true release
+          sudo sysctl kernel.perf_event_paranoid=1 && sudo sysctl kernel.kptr_restrict=0 # allow tests to execute
+          make test
+      - name: Publish Artifacts
+        run: |
+          for name in $(find . \( -name "async-profiler*.tar.gz" -o -name "async-profiler*.zip" \) -exec basename {} \;) ; do
+            # publish binary
+            curl -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Content-Type: application/zip" --data-binary "@${name}" "https://uploads.github.com/repos/${REPOSITORY}/releases/${RELEASE_ID}/assets?name=${name}"
+          done
+  build-and-publish-linux:
+    runs-on: ubuntu-latest
+    container:
+      image: docker://public.ecr.aws/async-profiler/asprof-builder:latest
+      options: --privileged # needed in order to use sysctl
+    steps:
+      # Unfortunately we cannot use this action to clone the repository due to the actions requiring Node 20 which this container doesn't support
+      # https://github.com/actions/checkout/issues/1590
+      # https://github.com/actions/checkout/issues/1590#issuecomment-2293211398
+
+      # - name: Checkout
+      #  uses: actions/checkout@v3
+
+      # Instead, we have to clone using git manually
+      - name: Build and Test
+        run: |
+          apt-get update && apt-get install -y git curl jq # curl for publishing artifacts, git for checkout out source, jq to parse github api responses
+          git clone https://github.com/${REPOSITORY}.git && cd async-profiler && git checkout $GITHUB_SHA # checkout sources
+          make COMMIT_TAG=true CC=/usr/local/musl/x86_64/bin/musl-gcc -j release # build x86 binaries
+          sudo sysctl kernel.perf_event_paranoid=1 && sudo sysctl kernel.kptr_restrict=0 # allow tests to execute
+          make test
+          make clean
+          make COMMIT_TAG=true ARCH_TAG=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=/usr/local/musl/aarch64/bin/musl-gcc -j release # build arm64 binaries
+      # Unfortunately we cannot use this action upload artifacts to the release due to the actions requiring Node 20 which this container doesn't support
+      # https://github.com/actions/checkout/issues/1590
+      # https://github.com/actions/checkout/issues/1590#issuecomment-2293211398
+
+      # - name: Publish Artifacts
+      #   uses: softprops/action-gh-release@v2
+
+      # Instead, we have to manually call the REST endpoints at https://docs.github.com/en/rest/releases/assets?apiVersion=2022-11-28
+      - name: Publish Artifacts
+        run: |
+          cd async-profiler
+          for name in $(find . \( -name "async-profiler*.tar.gz" -o -name "async-profiler*.zip" \) -exec basename {} \;) ; do
+            # publish binary
+            curl -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Content-Type: application/zip" --data-binary "@${name}" "https://uploads.github.com/repos/${REPOSITORY}/releases/${RELEASE_ID}/assets?name=${name}"
+          done
